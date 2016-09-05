@@ -44,6 +44,46 @@ class Parsedown
         return $markup;
     }
 
+	#
+	#--------------------------
+	# Blake's Custom Functions
+	#--------------------------
+	#
+	
+	#
+	# Twitter-like @User function
+	#
+	
+	function findUser($input)
+	{
+		$input = preg_replace_callback('/(^|[^a-z0-9_])@([a-z0-9_]+)/i',
+				function ($matches)
+				{
+					require $_SERVER['DOCUMENT_ROOT'] . '/festical/_database/database.php';
+					$username = substr(trim($matches[0]), 1);
+					$u_sql = "SELECT * FROM user WHERE user_username='$username' LIMIT 1";
+					$u_result = mysqli_query($database,$u_sql) or die(mysqli_errno($database));
+					$u_trws= mysqli_num_rows($u_result);
+					
+					if ($u_trws > 0) {
+						return " <a href='http://www.festical.info/u/$username'>@" . $username . "</a>";
+					} else {
+						return $matches[0];
+					}
+				},
+                 $input);
+		return $input;
+	}
+	
+
+	
+	#
+	#--------------------------
+	# ParseDown Functions
+	#--------------------------
+	#
+	
+	
     #
     # Setters
     #
@@ -115,12 +155,13 @@ class Parsedown
     # Blocks
     #
 
-    protected function lines(array $lines)
+    private function lines(array $lines)
     {
         $CurrentBlock = null;
 
         foreach ($lines as $line)
         {
+		$line = $this->findUser($line);
             if (chop($line) === '')
             {
                 if (isset($CurrentBlock))
@@ -175,7 +216,7 @@ class Parsedown
                 }
                 else
                 {
-                    if ($this->isBlockCompletable($CurrentBlock['type']))
+                    if (method_exists($this, 'block'.$CurrentBlock['type'].'Complete'))
                     {
                         $CurrentBlock = $this->{'block'.$CurrentBlock['type'].'Complete'}($CurrentBlock);
                     }
@@ -216,7 +257,7 @@ class Parsedown
                         $Block['identified'] = true;
                     }
 
-                    if ($this->isBlockContinuable($blockType))
+                    if (method_exists($this, 'block'.$blockType.'Continue'))
                     {
                         $Block['continuable'] = true;
                     }
@@ -245,7 +286,7 @@ class Parsedown
 
         # ~
 
-        if (isset($CurrentBlock['continuable']) and $this->isBlockCompletable($CurrentBlock['type']))
+        if (isset($CurrentBlock['continuable']) and method_exists($this, 'block'.$CurrentBlock['type'].'Complete'))
         {
             $CurrentBlock = $this->{'block'.$CurrentBlock['type'].'Complete'}($CurrentBlock);
         }
@@ -278,16 +319,6 @@ class Parsedown
         return $markup;
     }
 
-    protected function isBlockContinuable($Type)
-    {
-        return method_exists($this, 'block'.$Type.'Continue');
-    }
-
-    protected function isBlockCompletable($Type)
-    {
-        return method_exists($this, 'block'.$Type.'Complete');
-    }
-
     #
     # Code
 
@@ -301,6 +332,13 @@ class Parsedown
         if ($Line['indent'] >= 4)
         {
             $text = substr($Line['body'], 4);
+
+            if (strpos($text, "language-") !== false) {
+                ///echo "MATCHMATCHMATCH: $text";
+            } else {
+                //echo "NOMATCH";
+            }
+
 
             $Block = array(
                 'element' => array(
@@ -405,10 +443,20 @@ class Parsedown
 
             if (isset($matches[1]))
             {
-                $class = 'language-'.$matches[1];
+                $class = $matches[1];//'language-'.$matches[1];
 
+                //echo "<br>Class: $class<br>";
+
+                if (strpos($matches[1], "language-") !== false) {
+                    $class = str_replace("language-", "", $class);
+                }
+//echo "<br>Class: $class<br>";
                 $Element['attributes'] = array(
                     'class' => $class,
+                );
+            } else {
+                $Element['attributes'] = array(
+                    'class' => "nohighlight",
                 );
             }
 
@@ -1000,9 +1048,9 @@ class Parsedown
             $markerPosition = strpos($text, $marker);
 
             $Excerpt = array('text' => $excerpt, 'context' => $text);
-
             foreach ($this->InlineTypes[$marker] as $inlineType)
             {
+
                 $Inline = $this->{'inline'.$inlineType}($Excerpt);
 
                 if ( ! isset($Inline))
@@ -1064,8 +1112,15 @@ class Parsedown
         if (preg_match('/^('.$marker.'+)[ ]*(.+?)[ ]*(?<!'.$marker.')\1(?!'.$marker.')/s', $Excerpt['text'], $matches))
         {
             $text = $matches[2];
+
             $text = htmlspecialchars($text, ENT_NOQUOTES, 'UTF-8');
             $text = preg_replace("/[ ]*\n/", ' ', $text);
+
+            if (strpos($text, "language-") !== false) {
+                //echo "MATCHMATCHMATCH: $text";
+            } else {
+                //echo "no match";
+            }
 
             return array(
                 'extent' => strlen($matches[0]),
@@ -1148,8 +1203,27 @@ class Parsedown
     {
         if ( ! isset($Excerpt['text'][1]) or $Excerpt['text'][1] !== '[')
         {
+            //echo "not image. " . $Excerpt['text'] . "<br>";
+            if (substr($Excerpt['text'], 0, 2 ) === "!!") {
+                $t = $this->inlineVideo($Excerpt);
+                //echo "video: ";
+                ///var_dump($t);
+                //echo "<br>";
+
+                if ($t === null)
+                {
+                    return;
+                }
+
+                //return $t;
+                //return;
+            } else {
+                //echo substr($Excerpt['context'], 0, 2 ) . " == IS THIS A VIDEO?<br>";
+            }
             return;
         }
+
+
 
         $Excerpt['text']= substr($Excerpt['text'], 1);
 
@@ -1167,6 +1241,9 @@ class Parsedown
                 'attributes' => array(
                     'src' => $Link['element']['attributes']['href'],
                     'alt' => $Link['element']['text'],
+                    'width' => $Link['element']['attributes']['width'],
+                    'height' => $Link['element']['attributes']['height'],
+                    'size' => $Link['element']['attributes']['size'],
                 ),
             ),
         );
@@ -1178,15 +1255,29 @@ class Parsedown
         return $Inline;
     }
 
-    protected function inlineLink($Excerpt)
+    protected function inlineVideo($Excerpt)
     {
+        /*if ( ! isset($Excerpt['text'][1]) or $Excerpt['text'][1] !== '!')
+        {
+            if ( ! isset($Excerpt['text'][2]) or $Excerpt['text'][2] !== '[')
+            {
+                return;
+            }
+        }*/
+
+        //echo "Attempting video...";
+
+        $Excerpt['text']= substr($Excerpt['text'], 2);
+
         $Element = array(
-            'name' => 'a',
-            'handler' => 'line',
+            'name' => 'iframe',
             'text' => null,
             'attributes' => array(
-                'href' => null,
-                'title' => null,
+                'src' => null,
+                'width' => '560',
+                'height' => '315',
+                'frameborder' => '0',
+                'autoplay' => '0',
             ),
         );
 
@@ -1202,18 +1293,87 @@ class Parsedown
 
             $remainder = substr($remainder, $extent);
         }
+
+        if (preg_match('/^[(]((?:[^ ()]|[(][^ )]+[)])+)(?:[ ]+("[^"]*"|\'[^\']*\'))?(?:[ ]+("[^"]*"|\'[^\']*\'))?[)]/', $remainder, $matches))
+        {
+            $Element['attributes']['src'] = $matches[1];
+            //echo "<br> SRC : " . $Element['attributes']['src'] ." <br><br><hr>";
+            $extent += strlen($matches[0]);
+        } else {
+            //echo "<br>WHY NO FIND? : $remainder<br><br>";
+        }
+
+        $Inline = array(
+            'extent' => $extent + 1,
+            'element' => array(
+                'name' => 'object',
+                'attributes' => array(
+                    'data' => str_replace("http:", "https:", str_replace("watch?v=", "embed/", $Element['attributes']['src'])),
+                    /*'width' => '560',
+                    'height' => '315',
+                    'frameborder' => '0',
+                    'autoplay' => '0',*/
+                ),
+            ),
+        );
+
+       // $Inline['element']['attributes'] += $Element['attributes'];
+
+        //unset($Inline['element']['attributes']['src']);
+
+        return $Inline;
+    }
+
+    protected function inlineLink($Excerpt)
+    {
+        $Element = array(
+            'name' => 'a',
+            'handler' => 'line',
+            'text' => null,
+            'attributes' => array(
+                'href' => null,
+                'title' => null,
+                'size' => null,
+            ),
+        );
+
+        $extent = 0;
+
+        $remainder = $Excerpt['text'];
+
+        //echo $remainder;
+
+        if (preg_match('/\[((?:[^][]|(?R))*)\]/', $remainder, $matches))
+        {
+            $Element['text'] = $matches[1];
+
+            $extent += strlen($matches[0]);
+
+            $remainder = substr($remainder, $extent);
+        }
         else
         {
             return;
         }
 
-        if (preg_match('/^[(]((?:[^ ()]|[(][^ )]+[)])+)(?:[ ]+("[^"]*"|\'[^\']*\'))?[)]/', $remainder, $matches))
+        if (preg_match('/^[(]((?:[^ ()]|[(][^ )]+[)])+)(?:[ ]+("[^"]*"|\'[^\']*\'))?(?:[ ]+("[^"]*"|\'[^\']*\'))?[)]/', $remainder, $matches))
         {
             $Element['attributes']['href'] = $matches[1];
 
             if (isset($matches[2]))
             {
                 $Element['attributes']['title'] = substr($matches[2], 1, - 1);
+            }
+
+            if (isset($matches[3]))
+            {
+                $sizes =  explode("x", substr($matches[3], 2, - 1));
+                $Element['attributes']['width'] = $sizes[0];
+                $Element['attributes']['height'] = $sizes[1];
+                //$Element['attributes']['size'] = $matches[3];
+
+            } else {
+                $Element['attributes']['class'] = "img-responsive";
             }
 
             $extent += strlen($matches[0]);
@@ -1241,10 +1401,13 @@ class Parsedown
 
             $Element['attributes']['href'] = $Definition['url'];
             $Element['attributes']['title'] = $Definition['title'];
+            $Element['attributes']['width'] = $Definition['width'];
+            $Element['attributes']['height'] = $Definition['height'];
+            //$Element['attributes']['size'] = $Definition['size'];
         }
 
         $Element['attributes']['href'] = str_replace(array('&', '<'), array('&amp;', '&lt;'), $Element['attributes']['href']);
-
+        //echo $Element['attributes']['height'];
         return array(
             'extent' => $extent,
             'element' => $Element,
@@ -1397,6 +1560,7 @@ class Parsedown
         {
             foreach ($Element['attributes'] as $name => $value)
             {
+                //echo $name . " = " . $value . "<br>" ;
                 if ($value === null)
                 {
                     continue;
