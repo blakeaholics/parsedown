@@ -21,6 +21,7 @@ class Parsedown
 
     # ~
 
+
     function text($text)
     {
         # make sure no definitions are set
@@ -1227,7 +1228,9 @@ class Parsedown
 
         $Excerpt['text']= substr($Excerpt['text'], 1);
 
+        $this->isImage = true;
         $Link = $this->inlineLink($Excerpt);
+        $this->isImage = false;
 
         if ($Link === null)
         {
@@ -1365,15 +1368,16 @@ class Parsedown
                 $Element['attributes']['title'] = substr($matches[2], 1, - 1);
             }
 
-            if (isset($matches[3]))
-            {
-                $sizes =  explode("x", substr($matches[3], 2, - 1));
-                $Element['attributes']['width'] = $sizes[0];
-                $Element['attributes']['height'] = $sizes[1];
-                //$Element['attributes']['size'] = $matches[3];
+            if ($this->isImage) {
+                if (isset($matches[3])) {
+                    $sizes = explode("x", substr($matches[3], 2, -1));
+                    $Element['attributes']['width'] = $sizes[0];
+                    $Element['attributes']['height'] = $sizes[1];
+                    //$Element['attributes']['size'] = $matches[3];
 
-            } else {
-                $Element['attributes']['class'] = "img-responsive";
+                } else {
+                    $Element['attributes']['class'] = "img-responsive";
+                }
             }
 
             $extent += strlen($matches[0]);
@@ -1658,6 +1662,8 @@ class Parsedown
     }
 
     private static $instances = array();
+
+    private $isImage = false;
 
     #
     # Fields
